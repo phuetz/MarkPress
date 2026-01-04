@@ -13,7 +13,24 @@
 *   **🚀 Fast & Lightweight**: optimized for desktop performance.
 *   **🔒 Secure**: Safe link handling and local file processing (no cloud dependencies).
 
-## 🚀 Getting Started
+## ⬇️ Download & Installation
+
+For regular users who just want to use MarkPress, you don't need to build from source.
+
+1.  Go to the [Latest Releases](https://github.com/votre-user/votre-repo/releases/latest) page.
+2.  Download the **`MarkPress_Setup_v1.0.0.exe`** file.
+3.  Run the installer.
+
+### ⚠️ Windows SmartScreen Warning
+Since MarkPress is a free and open-source tool, the installer is not digitally signed with a paid certificate. Windows might show a blue or red "Windows protected your PC" screen. 
+
+**Don't worry, it's safe!** To proceed:
+1.  Click on **"More info"** (Informations complémentaires).
+2.  Click on the **"Run anyway"** (Exécuter quand même) button.
+
+---
+
+## 🚀 Getting Started (Developers)
 
 ### Prerequisites
 
