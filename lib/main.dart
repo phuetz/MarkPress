@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,8 +16,17 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'l10n/app_localizations.dart';
 import 'pdf_exporter.dart';
+import 'single_instance.dart';
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Single Instance Check
+  final isMainInstance = await SingleInstance.initialize(args);
+  if (!isMainInstance) {
+    exit(0);
+  }
+
   runApp(MarkPressApp(initialArgs: args));
 }
 
@@ -160,6 +171,17 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
   bool _isControllerInit = false;
   
   bool _isInit = false;
+  StreamSubscription? _singleInstanceSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _singleInstanceSub = SingleInstance.onFileReceived.listen((path) {
+      if (path.isNotEmpty) {
+        _openInitialFile(path);
+      }
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -213,6 +235,12 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
           // Correctly update index and setup controller
           _activeTabIndex = _openedFiles.length - 1;
           _setupTabController();
+          
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted && _isControllerInit && _tabController.index != _activeTabIndex) {
+                _tabController.animateTo(_activeTabIndex);
+             }
+          });
         });
       } else {
          // Fallback if file not found
@@ -264,6 +292,7 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _singleInstanceSub?.cancel();
     if (_isControllerInit) {
       _tabController.dispose();
     }
@@ -320,6 +349,12 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
             _activeTabIndex = _openedFiles.length - 1;
             _isLoading = false;
             _setupTabController();
+          });
+          
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted && _isControllerInit && _tabController.index != _activeTabIndex) {
+                _tabController.animateTo(_activeTabIndex);
+             }
           });
         }
       }
@@ -619,7 +654,7 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
   _CodeElementBuilder(this.context);
 
   @override
-  Widget? visitElement(md.Element element, TextStyle? preferredStyle) {
+  Widget? visitElement(md.Element element, TextStyle? preferredStyle, TextStyle? parentStyle) {
     var text = element.textContent;
     // Remove the last newline that is often added by the parser
     if (text.endsWith('\n')) {
@@ -628,6 +663,87 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
 
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+
+    // Detect Mermaid
+    bool isMermaid = false;
+    if (element.children != null && 
+        element.children!.isNotEmpty && 
+        element.children!.first is md.Element) {
+      final codeElement = element.children!.first as md.Element;
+      if (codeElement.tag == 'code' && 
+          codeElement.attributes.containsKey('class') &&
+          codeElement.attributes['class'] == 'language-mermaid') {
+        isMermaid = true;
+      }
+    }
+
+    if (isMermaid) {
+       try {
+         // Create Mermaid.ink URL
+         // Structure: { "code": "...", "mermaid": { "theme": "dark" } }
+         final jsonState = jsonEncode({
+           'code': text,
+           'mermaid': {'theme': isDark ? 'dark' : 'default'}
+         });
+         final base64State = base64Encode(utf8.encode(jsonState));
+         final url = 'https://mermaid.ink/img/$base64State';
+
+         return Container(
+           margin: const EdgeInsets.symmetric(vertical: 16),
+           padding: const EdgeInsets.all(16),
+           decoration: BoxDecoration(
+             color: theme.colorScheme.surface,
+             borderRadius: BorderRadius.circular(8),
+             border: Border.all(color: theme.colorScheme.outlineVariant),
+           ),
+           child: Column(
+             crossAxisAlignment: CrossAxisAlignment.stretch,
+             children: [
+               Row(
+                 mainAxisAlignment: MainAxisAlignment.end,
+                 children: [
+                   Text('Mermaid Diagram', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.primary)),
+                 ],
+               ),
+               const SizedBox(height: 8),
+               Center(
+                 child: Image.network(
+                   url,
+                   fit: BoxFit.contain,
+                   loadingBuilder: (context, child, loadingProgress) {
+                     if (loadingProgress == null) return child;
+                     return Center(
+                       child: CircularProgressIndicator(
+                         value: loadingProgress.expectedTotalBytes != null
+                             ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                             : null,
+                       ),
+                     );
+                   },
+                   errorBuilder: (context, error, stackTrace) {
+                     return Container(
+                       padding: const EdgeInsets.all(8),
+                       color: theme.colorScheme.errorContainer,
+                       child: Column(
+                         children: [
+                           Icon(Icons.broken_image, color: theme.colorScheme.error),
+                           const SizedBox(height: 4),
+                           Text('Error rendering diagram', style: TextStyle(color: theme.colorScheme.error)),
+                           const SizedBox(height: 4),
+                           Text(error.toString(), style: theme.textTheme.bodySmall, textAlign: TextAlign.center),
+                         ],
+                       ),
+                     );
+                   },
+                 ),
+               ),
+             ],
+           ),
+         );
+       } catch (e) {
+         // Fallback to code block on error
+       }
+    }
 
     return Stack(
       children: [
@@ -638,7 +754,7 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceVariant,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: theme.colorScheme.outlineVariant.withOpacity(0.5)),
+            border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
           ),
           child: SelectableText(
             text,
@@ -656,9 +772,9 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
             icon: const Icon(Icons.content_copy_rounded, size: 18),
             tooltip: 'Copy code',
             style: IconButton.styleFrom(
-              backgroundColor: theme.colorScheme.surface.withOpacity(0.5),
+              backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.5),
               foregroundColor: theme.colorScheme.primary,
-              hoverColor: theme.colorScheme.primary.withOpacity(0.1),
+              hoverColor: theme.colorScheme.primary.withValues(alpha: 0.1),
             ),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: text));
