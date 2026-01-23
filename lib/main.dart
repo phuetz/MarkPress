@@ -557,6 +557,7 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
                       key: ValueKey(file.name + file.content.length.toString() + l10n.localeName),
                       data: file.content,
                       selectable: true,
+                      extensionSet: md.ExtensionSet.gitHubFlavored,
                       builders: {
                         'h1': _HeaderBuilder(_anchors, _slugify, theme.textTheme.headlineMedium?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
                         'h2': _HeaderBuilder(_anchors, _slugify, theme.textTheme.titleLarge?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
@@ -678,7 +679,7 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
       final codeElement = element.children!.first as md.Element;
       if (codeElement.tag == 'code' && 
           codeElement.attributes.containsKey('class') &&
-          codeElement.attributes['class'] == 'language-mermaid') {
+          codeElement.attributes['class']!.contains('mermaid')) {
         isMermaid = true;
       }
     }
