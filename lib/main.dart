@@ -17,9 +17,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'l10n/app_localizations.dart';
 import 'pdf_exporter.dart';
 import 'single_instance.dart';
+import 'package:window_manager/window_manager.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
   
   // Single Instance Check
   final isMainInstance = await SingleInstance.initialize(args);
@@ -176,9 +178,13 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _singleInstanceSub = SingleInstance.onFileReceived.listen((path) {
+    _singleInstanceSub = SingleInstance.onFileReceived.listen((path) async {
       if (path.isNotEmpty) {
-        _openInitialFile(path);
+        await _openInitialFile(path);
+        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+           await windowManager.show();
+           await windowManager.focus();
+        }
       }
     });
   }
