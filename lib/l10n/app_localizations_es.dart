@@ -59,4 +59,37 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get msgCopiedToClipboard => 'Copiado al portapapeles';
+
+  @override
+  String get actionZoomIn => 'Zoom In';
+
+  @override
+  String get actionZoomOut => 'Zoom Out';
+
+  @override
+  String get actionResetZoom => 'Reset Zoom';
+
+  @override
+  String get actionToC => 'Table of Contents';
+
+  @override
+  String get labelTableOfContents => 'Table of Contents';
+
+  @override
+  String get actionPresentationMode => 'Presentation Mode';
+
+  @override
+  String get actionExitPresentationMode => 'Exit Presentation Mode';
+
+  @override
+  String get msgFileChanged => 'File changed on disk. Reloading...';
+
+  @override
+  String get actionReload => 'Reload';
+
+  @override
+  String get actionScrollTop => 'Scroll to Top';
+
+  @override
+  String get actionScrollBottom => 'Scroll to Bottom';
 }

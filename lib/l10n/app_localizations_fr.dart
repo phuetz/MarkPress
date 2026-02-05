@@ -59,4 +59,37 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get msgCopiedToClipboard => 'Copié dans le presse-papiers';
+
+  @override
+  String get actionZoomIn => 'Zoomer';
+
+  @override
+  String get actionZoomOut => 'Dézoomer';
+
+  @override
+  String get actionResetZoom => 'Réinitialiser le zoom';
+
+  @override
+  String get actionToC => 'Table des matières';
+
+  @override
+  String get labelTableOfContents => 'Table des matières';
+
+  @override
+  String get actionPresentationMode => 'Mode présentation';
+
+  @override
+  String get actionExitPresentationMode => 'Quitter le mode présentation';
+
+  @override
+  String get msgFileChanged => 'Fichier modifié sur le disque. Rechargement...';
+
+  @override
+  String get actionReload => 'Recharger';
+
+  @override
+  String get actionScrollTop => 'Haut de page';
+
+  @override
+  String get actionScrollBottom => 'Bas de page';
 }

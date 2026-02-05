@@ -40,6 +40,13 @@ class MarkdownFile {
   MarkdownFile({required this.name, required this.content, this.path});
 }
 
+class TocEntry {
+  final String text;
+  final String id;
+  final int level;
+  TocEntry(this.text, this.id, this.level);
+}
+
 class MarkPressApp extends StatefulWidget {
   final List<String> initialArgs;
   const MarkPressApp({super.key, this.initialArgs = const []});
@@ -164,6 +171,7 @@ class ViewerPage extends StatefulWidget {
 }
 
 class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _isLoading = false;
   final Map<String, GlobalKey> _anchors = {};
   
@@ -174,6 +182,11 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
   
   bool _isInit = false;
   StreamSubscription? _singleInstanceSub;
+  double _zoomScale = 1.0;
+  bool _isPresentationMode = false;
+  List<TocEntry> _tocEntries = [];
+  final Map<String, StreamSubscription<FileSystemEvent>> _fileWatchers = {};
+  final Map<MarkdownFile, ScrollController> _scrollControllers = {};
 
   @override
   void initState() {
@@ -238,6 +251,9 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
             content: content,
             path: path,
           ));
+
+          _watchFile(path);
+
           // Correctly update index and setup controller
           _activeTabIndex = _openedFiles.length - 1;
           _setupTabController();
@@ -247,6 +263,7 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
                 _tabController.animateTo(_activeTabIndex);
              }
           });
+          _updateToc();
         });
       } else {
          // Fallback if file not found
@@ -290,24 +307,105 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
     _tabController.addListener(() {
       // Always update state to match controller index
       // This ensures export and UI are always in sync with what is viewed
-      setState(() {
-        _activeTabIndex = _tabController.index;
-      });
+      if (_tabController.index != _activeTabIndex) {
+        setState(() {
+          _activeTabIndex = _tabController.index;
+          _updateToc();
+        });
+      }
     });
   }
 
   @override
   void dispose() {
     _singleInstanceSub?.cancel();
+    for (var sub in _fileWatchers.values) {
+      sub.cancel();
+    }
+    for (var controller in _scrollControllers.values) {
+      controller.dispose();
+    }
     if (_isControllerInit) {
       _tabController.dispose();
     }
     super.dispose();
   }
 
+  void _watchFile(String path) {
+    if (_fileWatchers.containsKey(path)) return;
+
+    try {
+      final file = File(path);
+      _fileWatchers[path] = file.watch(events: FileSystemEvent.modify).listen((event) async {
+        try {
+          if (await file.exists()) {
+             // Small delay to ensure file write is complete
+             await Future.delayed(const Duration(milliseconds: 100));
+             final content = await file.readAsString();
+             if (mounted) {
+               setState(() {
+                 bool updated = false;
+                 for (var f in _openedFiles) {
+                   if (f.path == path) {
+                     f.content = content;
+                     updated = true;
+                   }
+                 }
+                 if (updated) {
+                   _updateToc();
+                 }
+               });
+
+               if (mounted) {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(AppLocalizations.of(context)!.msgFileChanged),
+                      duration: const Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                      width: 250,
+                    ),
+                  );
+               }
+             }
+          }
+        } catch (e) {
+          debugPrint('Error reloading file: $e');
+        }
+      });
+    } catch (e) {
+      debugPrint('Error watching file: $e');
+    }
+  }
+
+  void _unwatchFile(String path) {
+    // Only cancel if no other open file uses this path
+    bool isUsed = false;
+    for (var f in _openedFiles) {
+      if (f.path == path) {
+        isUsed = true;
+        break;
+      }
+    }
+
+    if (!isUsed) {
+      _fileWatchers[path]?.cancel();
+      _fileWatchers.remove(path);
+    }
+  }
+
   void _closeTab(int index) {
     setState(() {
+      final file = _openedFiles[index];
+
+      _scrollControllers[file]?.dispose();
+      _scrollControllers.remove(file);
+
       _openedFiles.removeAt(index);
+      if (file.path != null) {
+        _unwatchFile(file.path!);
+      }
+
       if (_openedFiles.isEmpty) {
         final l10n = AppLocalizations.of(context)!;
         _openedFiles.add(MarkdownFile(name: l10n.tabWelcome, content: l10n.welcomeContent));
@@ -319,6 +417,60 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
 
   String _slugify(String text) {
     return text.toLowerCase().trim().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+  }
+
+  void _updateToc() {
+    if (_openedFiles.isEmpty) {
+      _tocEntries = [];
+      return;
+    }
+
+    final index = _isControllerInit ? _tabController.index : _activeTabIndex;
+    final currentFile = _openedFiles[index.clamp(0, _openedFiles.length - 1)];
+    final content = currentFile.content;
+
+    final entries = <TocEntry>[];
+    final lines = content.split('\n');
+
+    // Simple parsing for # Headers
+    // Note: This matches the default logic of flutter_markdown for github flavored
+    for (final line in lines) {
+       if (line.startsWith('#')) {
+         final match = RegExp(r'^(#{1,6})\s+(.*)$').firstMatch(line);
+         if (match != null) {
+           final hashes = match.group(1)!;
+           var text = match.group(2)!.trim();
+           final level = hashes.length;
+
+           if (level > 3) continue; // Only show h1-h3 in ToC
+
+           String id;
+           final idMatch = RegExp(r'\{#([^}]+)\}\s*$').firstMatch(text);
+           if (idMatch != null) {
+             final rawId = idMatch.group(1)!.trim();
+             id = _slugify(rawId);
+             text = text.substring(0, idMatch.start).trim();
+           } else {
+             id = _slugify(text);
+           }
+
+           entries.add(TocEntry(text, id, level));
+         }
+       }
+    }
+
+    _tocEntries = entries;
+  }
+
+  void _scrollToAnchor(String id) {
+     final key = _anchors[id];
+     if (key != null && key.currentContext != null) {
+       Scrollable.ensureVisible(
+         key.currentContext!,
+         duration: const Duration(milliseconds: 500),
+         curve: Curves.easeInOutCubic,
+       );
+     }
   }
 
   Future<void> _pickFile() async {
@@ -348,6 +500,10 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
             content: content,
             path: platformFile.path,
           ));
+
+          if (platformFile.path != null) {
+            _watchFile(platformFile.path!);
+          }
         }
 
         if (mounted) {
@@ -362,6 +518,7 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
                 _tabController.animateTo(_activeTabIndex);
              }
           });
+          _updateToc();
         }
       }
     } catch (e) {
@@ -440,7 +597,10 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
     final currentFile = _openedFiles[displayIndex.clamp(0, _openedFiles.length - 1)];
     
     return Scaffold(
-      appBar: AppBar(
+      key: _scaffoldKey,
+      appBar: _isPresentationMode
+        ? null
+        : AppBar(
         title: Text(
           l10n.appTitle,
           style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -486,6 +646,22 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
             },
           ).animate().fadeIn(delay: 100.ms).scale(),
           IconButton(
+            icon: const Icon(Icons.zoom_in),
+            tooltip: l10n.actionZoomIn,
+            onPressed: () => setState(() => _zoomScale = (_zoomScale + 0.1).clamp(0.5, 3.0)),
+          ).animate().fadeIn(delay: 150.ms).scale(),
+          IconButton(
+            icon: const Icon(Icons.zoom_out),
+            tooltip: l10n.actionZoomOut,
+            onPressed: () => setState(() => _zoomScale = (_zoomScale - 0.1).clamp(0.5, 3.0)),
+          ).animate().fadeIn(delay: 150.ms).scale(),
+          if ((_zoomScale - 1.0).abs() > 0.01)
+            IconButton(
+              icon: const Icon(Icons.restart_alt),
+              tooltip: l10n.actionResetZoom,
+              onPressed: () => setState(() => _zoomScale = 1.0),
+            ).animate().fadeIn().scale(),
+          IconButton(
             icon: const Icon(Icons.picture_as_pdf_outlined),
             tooltip: l10n.actionExport,
             onPressed: _exportPdf,
@@ -495,6 +671,11 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
             tooltip: l10n.actionOpen,
             onPressed: _pickFile,
           ).animate().fadeIn(delay: 400.ms).scale(),
+          IconButton(
+            icon: const Icon(Icons.list_alt),
+            tooltip: l10n.actionToC,
+            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+          ).animate().fadeIn(delay: 450.ms).scale(),
           const SizedBox(width: 8),
         ],
         bottom: (_openedFiles.length > 1 || (_openedFiles.isNotEmpty && _openedFiles.first.path != null)) ? PreferredSize(
@@ -527,97 +708,220 @@ class _ViewerPageState extends State<ViewerPage> with TickerProviderStateMixin {
           ),
         ) : null,
       ),
+      endDrawer: Drawer(
+        width: 300,
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
+              color: theme.colorScheme.surfaceContainerHighest,
+              width: double.infinity,
+              child: Text(
+                l10n.labelTableOfContents,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            Expanded(
+              child: _tocEntries.isEmpty
+                  ? Center(
+                      child: Text(
+                        "No headers found",
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _tocEntries.length,
+                      itemBuilder: (context, index) {
+                        final entry = _tocEntries[index];
+                        return InkWell(
+                          onTap: () {
+                            Navigator.pop(context);
+                            _scrollToAnchor(entry.id);
+                          },
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                              left: 16.0 + (entry.level - 1) * 16.0,
+                              right: 16,
+                              top: 12,
+                              bottom: 12,
+                            ),
+                            child: Text(
+                              entry.text,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: entry.level == 1 ? FontWeight.bold : FontWeight.normal,
+                                color: theme.colorScheme.onSurface,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
       body: _isLoading 
         ? Center(
             child: const CircularProgressIndicator()
                 .animate(onPlay: (controller) => controller.repeat())
                 .shimmer(duration: 1200.ms, color: theme.colorScheme.primaryContainer)
           )
-        : Column(
+        : Stack(
             children: [
-              if (currentFile.path != null)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  color: theme.colorScheme.primaryContainer.withOpacity(0.3),
-                  child: Text(
-                    l10n.labelPath(currentFile.path!),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ).animate().slideY(begin: -1, end: 0),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: _openedFiles.map((file) {
-                    return Markdown(
-                      // Using locale in the key forces rebuild when language changes
-                      key: ValueKey(file.name + file.content.length.toString() + l10n.localeName),
-                      data: file.content,
-                      selectable: true, // Restored
-                      extensionSet: md.ExtensionSet.gitHubFlavored,
-                      builders: {
-                        'h1': _HeaderBuilder(_anchors, _slugify, theme.textTheme.headlineMedium?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
-                        'h2': _HeaderBuilder(_anchors, _slugify, theme.textTheme.titleLarge?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
-                        'h3': _HeaderBuilder(_anchors, _slugify, theme.textTheme.titleMedium?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
-                        'pre': _CodeElementBuilder(context),
-                        'code': _CodeElementBuilder(context),
-                      },
-                      onTapLink: (text, href, title) async {
-                        if (href != null) {
-                          if (href.startsWith('#')) {
-                            final slug = _slugify(href.substring(1));
-                            final key = _anchors[slug];
-                            if (key != null && key.currentContext != null) {
-                              Scrollable.ensureVisible(
-                                key.currentContext!,
-                                duration: const Duration(milliseconds: 500),
-                                curve: Curves.easeInOutCubic,
-                              );
-                            }
-                            return;
-                          }
-                          final Uri? url = Uri.tryParse(href);
-                          if (url != null && ['http', 'https', 'mailto'].contains(url.scheme)) {
-                            if (await canLaunchUrl(url)) {
-                              await launchUrl(url, mode: LaunchMode.externalApplication);
-                            }
-                          }
-                        }
-                      },
-                      styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
-                        h1: theme.textTheme.headlineMedium?.copyWith(
+              Column(
+                children: [
+                  if (currentFile.path != null && !_isPresentationMode)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      color: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                      child: Text(
+                        l10n.labelPath(currentFile.path!),
+                        style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.primary,
                           fontWeight: FontWeight.bold,
-                          fontFamily: GoogleFonts.poppins().fontFamily,
-                        ),
-                        h1Padding: const EdgeInsets.only(top: 16, bottom: 8),
-                        h2Padding: const EdgeInsets.only(top: 12, bottom: 4),
-                        p: theme.textTheme.bodyLarge?.copyWith(
-                          height: 1.6,
-                        ),
-                        blockquoteDecoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceVariant.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border(
-                            left: BorderSide(color: theme.colorScheme.primary, width: 4),
-                          ),
-                        ),
-                        code: GoogleFonts.firaCode(
-                          backgroundColor: theme.colorScheme.surfaceVariant,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        codeblockDecoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceVariant,
-                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                    ).animate().fadeIn(duration: 400.ms);
-                  }).toList(),
-                ),
+                    ).animate().slideY(begin: -1, end: 0),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: _openedFiles.map((file) {
+                        final scrollController = _scrollControllers.putIfAbsent(file, () => ScrollController());
+                        return MediaQuery(
+                          data: MediaQuery.of(context).copyWith(
+                            textScaler: TextScaler.linear(_zoomScale * (_isPresentationMode ? 1.5 : 1.0)),
+                          ),
+                          child: Markdown(
+                            controller: scrollController,
+                            // Using locale in the key forces rebuild when language changes
+                            key: ValueKey(file.name + file.content.length.toString() + l10n.localeName + _zoomScale.toString() + _isPresentationMode.toString()),
+                            data: file.content,
+                            selectable: true, // Restored
+                            extensionSet: md.ExtensionSet.gitHubFlavored,
+                          builders: {
+                            'h1': _HeaderBuilder(_anchors, _slugify, theme.textTheme.headlineMedium?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
+                            'h2': _HeaderBuilder(_anchors, _slugify, theme.textTheme.titleLarge?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
+                            'h3': _HeaderBuilder(_anchors, _slugify, theme.textTheme.titleMedium?.copyWith(fontFamily: GoogleFonts.poppins().fontFamily)),
+                            'pre': _CodeElementBuilder(context),
+                            'code': _CodeElementBuilder(context),
+                          },
+                          onTapLink: (text, href, title) async {
+                            if (href != null) {
+                              if (href.startsWith('#')) {
+                                final slug = _slugify(href.substring(1));
+                                final key = _anchors[slug];
+                                if (key != null && key.currentContext != null) {
+                                  Scrollable.ensureVisible(
+                                    key.currentContext!,
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeInOutCubic,
+                                  );
+                                }
+                                return;
+                              }
+                              final Uri? url = Uri.tryParse(href);
+                              if (url != null && ['http', 'https', 'mailto'].contains(url.scheme)) {
+                                if (await canLaunchUrl(url)) {
+                                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                                }
+                              }
+                            }
+                          },
+                          styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                            h1: theme.textTheme.headlineMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: GoogleFonts.poppins().fontFamily,
+                            ),
+                            h1Padding: const EdgeInsets.only(top: 16, bottom: 8),
+                            h2Padding: const EdgeInsets.only(top: 12, bottom: 4),
+                            p: theme.textTheme.bodyLarge?.copyWith(
+                              height: 1.6,
+                            ),
+                            blockquoteDecoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceVariant.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border(
+                                left: BorderSide(color: theme.colorScheme.primary, width: 4),
+                              ),
+                            ),
+                            code: GoogleFonts.firaCode(
+                              backgroundColor: theme.colorScheme.surfaceVariant,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            codeblockDecoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceVariant,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          ),
+                        ).animate().fadeIn(duration: 400.ms);
+                      }).toList(),
+                    ),
+                  ),
+                ],
               ),
+              if (_isPresentationMode)
+                Positioned(
+                  bottom: 32,
+                  right: 32,
+                  child: FloatingActionButton.extended(
+                    onPressed: () => setState(() => _isPresentationMode = false),
+                    icon: const Icon(Icons.close),
+                    label: Text(l10n.actionExitPresentationMode),
+                  ).animate().scale(delay: 500.ms),
+                ),
+
+              if (!_isPresentationMode && _openedFiles.isNotEmpty)
+                Positioned(
+                  bottom: 32,
+                  right: 32,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                       FloatingActionButton.small(
+                        heroTag: 'scrollTop',
+                        tooltip: l10n.actionScrollTop,
+                        onPressed: () {
+                           final controller = _scrollControllers[currentFile];
+                           if (controller != null && controller.hasClients) {
+                             controller.animateTo(
+                               0,
+                               duration: const Duration(milliseconds: 500),
+                               curve: Curves.easeOut,
+                             );
+                           }
+                        },
+                        child: const Icon(Icons.arrow_upward),
+                      ),
+                      const SizedBox(height: 16),
+                      FloatingActionButton.small(
+                        heroTag: 'scrollBottom',
+                        tooltip: l10n.actionScrollBottom,
+                        onPressed: () {
+                           final controller = _scrollControllers[currentFile];
+                           if (controller != null && controller.hasClients) {
+                             controller.animateTo(
+                               controller.position.maxScrollExtent,
+                               duration: const Duration(milliseconds: 500),
+                               curve: Curves.easeOut,
+                             );
+                           }
+                        },
+                        child: const Icon(Icons.arrow_downward),
+                      ),
+                    ],
+                  ).animate().scale(delay: 300.ms),
+                ),
             ],
           ),
     );
