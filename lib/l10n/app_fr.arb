@@ -12,5 +12,16 @@
     "aboutDev": "Développé par SergeT",
     "aboutDesc": "MarkPress est un visualiseur Markdown moderne et léger pour ordinateur. Consultez plusieurs fichiers dans des onglets, naviguez facilement et exportez vos documents en PDF de haute qualité.",
     "welcomeContent": "# Bienvenue sur MarkPress\n\nCliquez sur l'icône **dossier** en haut à droite pour ouvrir des fichiers `.md`.\n\n## Fonctionnalités\n- **Support multi-onglets**\n- **Export vers PDF** (Moteur MarkPress)\n- **Diagrammes Mermaid** intégrés\n- **Multi-langue**\n- Interface simple et rapide",
-    "msgCopiedToClipboard": "Copié dans le presse-papiers"
+    "msgCopiedToClipboard": "Copié dans le presse-papiers",
+    "actionZoomIn": "Zoomer",
+    "actionZoomOut": "Dézoomer",
+    "actionResetZoom": "Réinitialiser le zoom",
+    "actionToC": "Table des matières",
+    "labelTableOfContents": "Table des matières",
+    "actionPresentationMode": "Mode présentation",
+    "actionExitPresentationMode": "Quitter le mode présentation",
+    "msgFileChanged": "Fichier modifié sur le disque. Rechargement...",
+    "actionReload": "Recharger",
+    "actionScrollTop": "Haut de page",
+    "actionScrollBottom": "Bas de page"
 }

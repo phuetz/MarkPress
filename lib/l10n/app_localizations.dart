@@ -187,6 +187,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Copied to clipboard'**
   String get msgCopiedToClipboard;
+
+  /// No description provided for @actionZoomIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom In'**
+  String get actionZoomIn;
+
+  /// No description provided for @actionZoomOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom Out'**
+  String get actionZoomOut;
+
+  /// No description provided for @actionResetZoom.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset Zoom'**
+  String get actionResetZoom;
+
+  /// No description provided for @actionToC.
+  ///
+  /// In en, this message translates to:
+  /// **'Table of Contents'**
+  String get actionToC;
+
+  /// No description provided for @labelTableOfContents.
+  ///
+  /// In en, this message translates to:
+  /// **'Table of Contents'**
+  String get labelTableOfContents;
+
+  /// No description provided for @actionPresentationMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Presentation Mode'**
+  String get actionPresentationMode;
+
+  /// No description provided for @actionExitPresentationMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Exit Presentation Mode'**
+  String get actionExitPresentationMode;
+
+  /// No description provided for @msgFileChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'File changed on disk. Reloading...'**
+  String get msgFileChanged;
+
+  /// No description provided for @actionReload.
+  ///
+  /// In en, this message translates to:
+  /// **'Reload'**
+  String get actionReload;
+
+  /// No description provided for @actionScrollTop.
+  ///
+  /// In en, this message translates to:
+  /// **'Scroll to Top'**
+  String get actionScrollTop;
+
+  /// No description provided for @actionScrollBottom.
+  ///
+  /// In en, this message translates to:
+  /// **'Scroll to Bottom'**
+  String get actionScrollBottom;
 }
 
 class _AppLocalizationsDelegate

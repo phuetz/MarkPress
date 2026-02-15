@@ -32,5 +32,16 @@
     "aboutDev": "Developed by SergeT",
     "aboutDesc": "MarkPress is a modern, lightweight Markdown viewer for desktop. View multiple files in tabs, navigate with ease, and export your documents to high-quality PDFs.",
     "welcomeContent": "# Welcome to MarkPress\n\nClick the **folder icon** in the top right to open `.md` files.\n\n## Features\n- **Multi-tabs support**\n- **Export to PDF** (MarkPress engine)\n- **Mermaid diagrams** support\n- **Multi-language** support\n- Simple and fast interface",
-    "msgCopiedToClipboard": "Copied to clipboard"
+    "msgCopiedToClipboard": "Copied to clipboard",
+    "actionZoomIn": "Zoom In",
+    "actionZoomOut": "Zoom Out",
+    "actionResetZoom": "Reset Zoom",
+    "actionToC": "Table of Contents",
+    "labelTableOfContents": "Table of Contents",
+    "actionPresentationMode": "Presentation Mode",
+    "actionExitPresentationMode": "Exit Presentation Mode",
+    "msgFileChanged": "File changed on disk. Reloading...",
+    "actionReload": "Reload",
+    "actionScrollTop": "Scroll to Top",
+    "actionScrollBottom": "Scroll to Bottom"
 }
